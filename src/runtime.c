@@ -8,7 +8,7 @@
 
 static size_t read_header(char *buffer, size_t size, size_t nitems, void *userdata)
 {
-    curl_slist *headers = (curl_slist *) userdata;    
+    struct curl_slist *headers = (struct curl_slist *) userdata;
     headers = curl_slist_append(headers, buffer);
 
     return size * nitems;
@@ -23,7 +23,7 @@ static size_t read_body(char *buffer, size_t size, size_t nitems, void *userdata
     return size * nitems;
 }
 
-void run_handler(aws_lambda_response_t *(*handler)(aws_lambda_request_t *req))
+void run_handler(aws_lambda_response_t *(*handler)(aws_lambda_request_t *req, aws_lambda_context_t *ctx))
 {
     char url[128];
     snprintf(url, sizeof(url), "http://%s/2018-06-01/runtime/invocation/next", getenv("AWS_LAMBDA_RUNTIME_API"));
@@ -35,7 +35,7 @@ void run_handler(aws_lambda_response_t *(*handler)(aws_lambda_request_t *req))
 
     ctx->function_name = getenv("AWS_LAMBDA_FUNCTION_NAME");
     ctx->function_version = getenv("AWS_LAMBDA_FUNCTION_VERSION");
-    ctx->memory_limit_in_mb = aoti(getenv("AWS_LAMBDA_FUNCTION_MEMORY_SIZE"));
+    ctx->memory_limit_in_mb = atoi(getenv("AWS_LAMBDA_FUNCTION_MEMORY_SIZE"));
     ctx->log_group_name = getenv("AWS_LAMBDA_LOG_GROUP_NAME");
     ctx->log_stream_name = getenv("AWS_LAMBDA_LOG_STREAM_NAME");
     // TODO: Parse identity and client_context from headers
@@ -59,16 +59,16 @@ void run_handler(aws_lambda_response_t *(*handler)(aws_lambda_request_t *req))
 
         curl_easy_perform(curl);
 
-	for (curl_slist *header = headers; header != NULL; header = header->next) {
-	    char *token = strsep(&header->data, ":");
-            if (strcmp(token, "lambda-runtime-aws-request-id")
-		ctx->aws_request_id = strsep(&header->data, ":");
-            else if (strcmp(token, "lambda-runtime-invoked-function-arn")
-		ctx->invoked_function_arn = strsep(&header->data, ":");
-            else if (strcmp(token, "lambda-runtime-deadline-ms")
-		ctx->deadline_ms = strtol(strsep(&header->data, ":"));
-	    else
-		;
+	for (struct curl_slist *header = headers; header != NULL; header = header->next) {
+            char *token = strsep(&header->data, ":");
+            if (strcmp(token, "lambda-runtime-aws-request-id"))
+                ctx->aws_request_id = strsep(&header->data, ":");
+            else if (strcmp(token, "lambda-runtime-invoked-function-arn"))
+                ctx->invoked_function_arn = strsep(&header->data, ":");
+            else if (strcmp(token, "lambda-runtime-deadline-ms"))
+                ctx->deadline_ms = strtol(strsep(&header->data, ":"), NULL, 10);
+            else
+            ;
 	}
 
         aws_lambda_response_t *res = handler(req, ctx);
@@ -84,8 +84,8 @@ void run_handler(aws_lambda_response_t *(*handler)(aws_lambda_request_t *req))
         curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
         curl_easy_setopt(curl, CURLOPT_POSTFIELDS, res->payload);
 
-        curl_slist_free_all(headers)
-	free(req->payload);
+        curl_slist_free_all(headers);
+        free(req->payload);
 
         curl_easy_perform(curl);
     }
